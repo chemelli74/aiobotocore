@@ -1,7 +1,10 @@
+import asyncio
+
 from botocore import UNSIGNED
 from botocore import __version__ as botocore_version
 from botocore import translate
 from botocore.exceptions import PartialCredentialsError
+from botocore.loaders import Loader
 from botocore.session import EVENT_ALIASES, ServiceModel
 from botocore.session import Session as _SyncSession
 from botocore.session import UnknownServiceError, copy
@@ -98,14 +101,25 @@ class AioSession(_SyncSession):
         )
         return ServiceModel(service_description, service_name=service_name)
 
-    async def get_service_data(self, service_name, api_version=None):
+    def _get_component(self, data_path, api_version):
+        _loader: Loader = self.get_component('data_loader')
+        return _loader.load_service_model(
+            data_path, type_name='service-2', api_version=api_version
+        )
+
+    async def get_service_data(
+        self, service_name, api_version=None, load_executor=False
+    ):
         """
         Retrieve the fully merged data associated with a service.
         """
         data_path = service_name
-        service_data = self.get_component('data_loader').load_service_model(
-            data_path, type_name='service-2', api_version=api_version
-        )
+        if load_executor:
+            service_data = await asyncio.get_running_loop().run_in_executor(
+                None, self._get_component, data_path, api_version
+            )
+        else:
+            service_data = self._get_component(data_path, api_version)
         service_id = EVENT_ALIASES.get(service_name, service_name)
         await self._events.emit(
             f'service-data-loaded.{service_id}',
